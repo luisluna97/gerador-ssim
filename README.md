@@ -63,7 +63,7 @@ O SIROS (Sistema de Registro de Operações de Transporte Aéreo) é um sistema 
   - Todo o processamento é realizado em tempo real e os dados são descartados após o uso.
 
 - **Suporte:**
-  - Em caso de dúvidas ou problemas, entre em contato com o luis.luna@ufpe.br.
+  - Em caso de dúvidas ou problemas, entre em contato com luis.luna@ufpe.br.
 
 ## **Sobre o SSIM:**
 
