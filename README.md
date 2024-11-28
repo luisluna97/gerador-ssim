@@ -63,6 +63,7 @@ O SIROS (Sistema de Registro de Operações de Transporte Aéreo) é um sistema 
 - **Segurança dos Dados:**
   - Nenhum dado enviado é armazenado em nossos servidores.
   - Todo o processamento é realizado em tempo real e os dados são descartados após o uso.
+  - O campo "Voo seguinte" apenas repete o voo atual, pois não conseguimos extrair tal informação na malha disponibilizada pela ANAC.
 
 - **Suporte:**
   - Em caso de dúvidas ou problemas, entre em contato com luis.luna@ufpe.br.
