@@ -28,7 +28,7 @@ O SIROS (Sistema de Registro de Operações de Transporte Aéreo) é um sistema 
 
 ## **Como utilizar a aplicação?**
 
-1. **Acesse a aplicação online:** (fornecer o link da aplicação hospedada no Streamlit Cloud)
+1. **Acesse a aplicação online:** [GERADOR DE ARQUIVO SSIM](https://gerador-ssim-me42pp9k4m78esyvgvreyw.streamlit.app/)
 
 2. **Selecione o método para informar a companhia aérea:**
    - **Por País e Companhia Aérea:** Selecione o país e, em seguida, a companhia aérea.
