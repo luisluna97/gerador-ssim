@@ -67,8 +67,8 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
         icao_to_iata_aircraft = dict(zip(aircraft_df['ICAO'], aircraft_df['IATA']))
 
         # Converter as colunas de data/hora para datetime
-        df['Partida_Prevista_DH'] = pd.to_datetime(df['Partida Prevista'], format="%d/%m/%Y %H:%M")
-        df['Chegada_Prevista_DH'] = pd.to_datetime(df['Chegada Prevista'], format="%d/%m/%Y %H:%M")
+        df['Partida_Prevista_DH'] = pd.to_datetime(df['Partida Prevista'], format="%d/%m/%Y %H:%M", errors='coerce')
+        df['Chegada_Prevista_DH'] = pd.to_datetime(df['Chegada Prevista'], format="%d/%m/%Y %H:%M", errors='coerce')
 
         # Remover o 'Z' do número do voo, se existir
         df['Voo'] = df['Voo'].astype(str).str.strip()
@@ -202,7 +202,7 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
 
                 # Lógica para determinar o date_counter baseado na Etapa
                 if numero_voo not in flight_date_counter:
-                    flight_date_counter[numero_voo] = 1  # Inicializa o date_counter
+                    flight_date_counter[numero_voo] = 0  # Inicializa o date_counter com 0
                 if etapa == "01":
                     flight_date_counter[numero_voo] += 1  # Incrementa o date_counter quando Etapa é 01
 
