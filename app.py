@@ -216,8 +216,11 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
                 # Obter o valor do contador de ocorrência e formatar com dois dígitos
                 occurrence_counter = str(flight_counters[flight_date_key]).zfill(2)
 
-                # Construir o campo de 8 caracteres
-                eight_char_field = f"{numero_voo_padded}{date_counter}{occurrence_counter}"
+                # Obter a 'etapa' do CSV
+                etapa = str(row['etapa']).strip()
+
+                # Construir o campo de 8 caracteres substituindo 'occurrence_counter' por 'etapa'
+                eight_char_field = f"{numero_voo_padded}{date_counter}{etapa}"
 
                 # Número do voo para exibição (preenchido com espaços à direita até 5 caracteres)
                 numero_voo_display = numero_voo.rjust(5)
