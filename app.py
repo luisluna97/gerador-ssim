@@ -217,7 +217,7 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
                 occurrence_counter = str(flight_counters[flight_date_key]).zfill(2)
 
                 # Obter a 'etapa' do CSV
-                etapa = str(row['Etapa']).strip()
+                etapa = str(row['Etapa']).strip().zfill(2)
 
                 # Construir o campo de 8 caracteres substituindo 'occurrence_counter' por 'etapa'
                 eight_char_field = f"{numero_voo_padded}{date_counter}{etapa}"
