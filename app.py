@@ -74,6 +74,14 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
         df['Voo'] = df['Voo'].astype(str).str.strip()
         df['Voo'] = df['Voo'].str.replace('^Z', '', regex=True)
 
+        # Verificar se a coluna 'Etapa' existe
+        if 'Etapa' not in df.columns:
+            st.error("A coluna 'Etapa' não foi encontrada no arquivo CSV de malha.")
+            return
+
+        # Garantir que a 'Etapa' tenha dois dígitos
+        df['Etapa'] = df['Etapa'].astype(str).str.strip().str.zfill(2)
+
         # Determinar datas mínima e máxima no CSV
         data_min_date = df['Partida_Prevista_DH'].dt.date.min()
         data_max_date = df['Chegada_Prevista_DH'].dt.date.max()
@@ -128,9 +136,8 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
             # Definir o fuso horário de Brasília
             brasilia_offset = -3.0
 
-            # Inicializar os contadores
-            flight_counters = {}
-            date_counters = {}
+            # Inicializar o dicionário para rastrear o date_counter por voo
+            flight_date_counter = {}
 
             # Ordenar o DataFrame para garantir a ordem correta
             df_sorted = df.sort_values(by=['Voo', 'Partida_Prevista_DH'])
@@ -186,41 +193,23 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
                 # Número do voo preenchido com zeros à esquerda até 4 dígitos
                 numero_voo_padded = numero_voo.zfill(4)
 
-                # Chave para o voo (número do voo)
-                flight_key = numero_voo_padded
-
-                # Chave para o voo e data
-                flight_date_key = (numero_voo_padded, partida_prevista_dh.date())
-
-                # Atualizar o contador de data para este número de voo
-                if flight_key not in date_counters:
-                    date_counters[flight_key] = 1
+                # Obter a 'Etapa' do CSV e garantir dois dígitos
+                etapa = row['Etapa']
+                if pd.isnull(etapa):
+                    etapa = "00"  # Valor padrão se 'Etapa' estiver ausente
                 else:
-                    # Incrementa o contador de data apenas se a data atual for diferente da última
-                    last_date = date_counters.get(flight_key + '_last_date')
-                    if partida_prevista_dh.date() != last_date:
-                        date_counters[flight_key] += 1
+                    etapa = str(etapa).strip().zfill(2)
 
-                # Atualizar a última data processada para este voo
-                date_counters[flight_key + '_last_date'] = partida_prevista_dh.date()
+                # Lógica para determinar o date_counter baseado na Etapa
+                if numero_voo not in flight_date_counter:
+                    flight_date_counter[numero_voo] = 1  # Inicializa o date_counter
+                if etapa == "01":
+                    flight_date_counter[numero_voo] += 1  # Incrementa o date_counter quando Etapa é 01
 
-                # Obter o valor do contador de data e formatar com dois dígitos
-                date_counter = str(date_counters[flight_key]).zfill(2)
+                date_counter = flight_date_counter[numero_voo]
 
-                # Atualizar o contador de ocorrência para este número de voo e data
-                if flight_date_key not in flight_counters:
-                    flight_counters[flight_date_key] = 1
-                else:
-                    flight_counters[flight_date_key] += 1
-
-                # Obter o valor do contador de ocorrência e formatar com dois dígitos
-                occurrence_counter = str(flight_counters[flight_date_key]).zfill(2)
-
-                # Obter a 'etapa' do CSV
-                etapa = str(row['Etapa']).strip().zfill(2)
-
-                # Construir o campo de 8 caracteres substituindo 'occurrence_counter' por 'etapa'
-                eight_char_field = f"{numero_voo_padded}{date_counter}{etapa}"
+                # Construir o campo de 8 caracteres substituindo 'occurrence_counter' por 'Etapa'
+                eight_char_field = f"{numero_voo_padded}{str(date_counter).zfill(2)}{etapa}"
 
                 # Número do voo para exibição (preenchido com espaços à direita até 5 caracteres)
                 numero_voo_display = numero_voo.rjust(5)
