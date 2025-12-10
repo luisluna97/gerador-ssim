@@ -115,7 +115,7 @@ def gerar_ssim(csv_path, codigo_iata, output_file=None):
                 numero_linha += 1
 
             # Linha 2
-            linha_2_conteudo = f"2U{codigo_iata}  0008    {data_min}{data_max}{data_emissao}Created by dnata capacity"
+            linha_2_conteudo = f"2L{codigo_iata}  0008    {data_min}{data_max}{data_emissao}Created by dnata capacity"
             posicao_p = 72
             espacos_antes_p = posicao_p - len(linha_2_conteudo) - 1
             linha_2 = linha_2_conteudo + (' ' * espacos_antes_p) + 'P'
