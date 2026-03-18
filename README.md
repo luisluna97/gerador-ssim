@@ -1,6 +1,10 @@
 # SSIM File Generator
 
-Please select your preferred language:
+Documentation:
 
-- [Português](README.pt.md)
+- [Portuguese](README.pt.md)
 - [English](README.en.md)
+
+Version history:
+
+- [CHANGELOG.md](CHANGELOG.md)

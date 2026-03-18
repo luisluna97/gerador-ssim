@@ -1,78 +1,69 @@
 # Gerador de Arquivo SSIM
 
-Esta aplicação converte arquivos de malha aérea fornecidos pela **ANAC** (Agência Nacional de Aviação Civil) através do sistema **SIROS** em arquivos no formato **SSIM**, padrão utilizado pela indústria aeronáutica para troca de informações de horários de voos.
+Aplicacao Streamlit para gerar arquivos SSIM a partir da base publica do SIROS/ANAC.
 
-[GERADOR DE ARQUIVO SSIM](https://gerador-ssim-me42pp9k4m78esyvgvreyw.streamlit.app/)
+## Visao geral
 
-## **O que é o SIROS?**
+Na versao atual, a fonte de dados nao e mais um CSV enviado pelo usuario. O app consome diretamente o endpoint:
 
-O SIROS (Sistema de Registro de Operações de Transporte Aéreo) é um sistema da ANAC onde as companhias aéreas registram suas operações de voos regulares e não regulares no Brasil. Mais informações podem ser encontradas no site oficial:
+`https://siros.anac.gov.br/siros/registros/registros/registros.csv`
 
-[SIROS - ANAC](https://siros.anac.gov.br/SIROS/view/registro/frmConsultaVoos)
+O usuario seleciona:
 
-## **Como funciona a aplicação?**
+1. Companhia aerea
+2. Um ou mais aeroportos da companhia
+3. Data inicial
+4. Data final
 
-1. **Entrada de Dados:**
-   - **Método de Seleção da Companhia Aérea:**
-     - **Selecionar por País e Companhia Aérea:** Permite que o usuário selecione o país e a companhia aérea desejada a partir de listas.
-     - **Inserir código IATA manualmente:** Permite que o usuário digite diretamente o código IATA de 2 letras da companhia aérea.
-   - **Upload do Arquivo de Malha CSV:**
-     - O usuário faz o upload do arquivo CSV contendo os dados de voos obtidos do SIROS.
+Depois disso, o app gera e libera o download do arquivo SSIM.
 
-2. **Processamento:**
-   - A aplicação converte os dados do arquivo CSV para o formato SSIM, realizando mapeamentos necessários, como códigos de aeroportos e aeronaves.
+## Como funciona
 
-3. **Saída de Dados:**
-   - Gera um arquivo SSIM compatível com os padrões da indústria.
-   - O arquivo gerado pode ser baixado diretamente através da aplicação.
+1. O Streamlit carrega a base publica do SIROS.
+2. O app mapeia companhia, aeroportos, equipamento e timezone.
+3. Os horarios da API, recebidos em UTC, sao convertidos para horario local do aeroporto.
+4. O periodo SSIM e montado a partir de `Inicio Operacao` e `Fim Operacao`.
+5. A frequencia SSIM e montada a partir das colunas `Seg` a `Dom`.
+6. O output mantem a estrutura SSIM ja usada pelo projeto.
 
-## **Como utilizar a aplicação?**
+## Filtros disponiveis
 
-1. **Acesse a aplicação online:** [GERADOR DE ARQUIVO SSIM](https://gerador-ssim-me42pp9k4m78esyvgvreyw.streamlit.app/)
+- Companhia aerea
+- Multisselecao de aeroportos
+- Data inicial
+- Data final
 
-2. **Selecione o método para informar a companhia aérea:**
-   - **Por País e Companhia Aérea:** Selecione o país e, em seguida, a companhia aérea.
-   - **Código IATA Manualmente:** Digite o código IATA de 2 letras da companhia aérea.
+Se nenhum aeroporto for selecionado, o app usa todos os aeroportos da companhia no periodo filtrado.
 
-3. **Faça o upload do arquivo de malha CSV:**
-   - O arquivo deve estar no formato CSV e seguir o padrão fornecido pelo SIROS.
+## Mapeamento principal
 
-4. **Gerar o Arquivo SSIM:**
-   - Clique em **"Gerar Arquivo SSIM"**.
-   - Aguarde o processamento.
+- `Cod. Empresa` -> companhia selecionada
+- `Cod. Origem` / `Cod Destino` -> aeroporto IATA via `airport.csv`
+- `Equip.` -> equipamento SSIM via `ACT TYPE.xlsx`
+- `Seg` ... `Dom` -> frequencia SSIM
+- `Inicio Operacao` / `Fim Operacao` -> vigencia do voo no SSIM
+- `Horario Partida` / `Horario Chegada` -> horarios locais no SSIM
+- `Quant. Assentos` + `Objeto Transporte` / `Tipo Servico` -> status `J` ou `F`
 
-5. **Baixar o Arquivo Gerado:**
-   - Após o processamento, um botão para download aparecerá.
-   - Clique em **"Baixar Arquivo SSIM"** para salvar o arquivo no seu computador.
+## Execucao local
 
-## **Requisitos do Arquivo CSV:**
+```bash
+streamlit run app.py
+```
 
-- O arquivo deve ser exportado do SIROS no formato CSV.
-- Deve conter as colunas necessárias para o processamento, como:
-  - **Início**
-  - **Origem**
-  - **Destino**
-  - **Partida Prevista**
-  - **Chegada Prevista**
-  - **Equip**
-  - **Voo**
-  - **Tipo**
+## Arquivos principais
 
-## **Informações Adicionais:**
+- `app.py`: app Streamlit e motor de geracao SSIM
+- `airport.csv`: mapeamento ICAO/IATA e timezone
+- `ACT TYPE.xlsx`: mapeamento de equipamento
+- `iata_airlines.csv`: mapeamento ICAO -> IATA da companhia
+- `CHANGELOG.md`: historico de versoes
 
-- **Segurança dos Dados:**
-  - Nenhum dado enviado é armazenado em nossos servidores.
-  - Todo o processamento é realizado em tempo real e os dados são descartados após o uso.
-  - O campo "Voo seguinte" apenas repete o voo atual, pois não conseguimos extrair tal informação na malha disponibilizada pela ANAC.
+## Historico
 
-- **Suporte:**
-  - Em caso de dúvidas ou problemas, entre em contato com luis.luna@ufpe.br.
+Veja [CHANGELOG.md](CHANGELOG.md).
 
-## **Sobre o SSIM:**
+## Suporte
 
-O **SSIM** (Standard Schedules Information Manual) é um padrão internacional desenvolvido pela **IATA** (International Air Transport Association) para o intercâmbio de informações de horários de voos entre companhias aéreas, aeroportos e outros stakeholders da indústria.
-
----
-
-**Nota:** Esta aplicação foi desenvolvida para facilitar o processo de conversão de dados do SIROS para o formato SSIM, agilizando a comunicação e a integração de informações no setor aeronáutico.
+Para duvidas operacionais ou evolucao do projeto, use o repositorio atual no GitHub.
 

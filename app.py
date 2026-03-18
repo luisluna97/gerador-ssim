@@ -1,341 +1,610 @@
-import streamlit as st
+from datetime import date, datetime, timedelta
+
+import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-import os
+import streamlit as st
+
+
+SIROS_URL = "https://siros.anac.gov.br/siros/registros/registros/registros.csv"
+DAY_COLUMNS = [
+    ("Seg", "1"),
+    ("Ter", "2"),
+    ("Qua", "3"),
+    ("Qui", "4"),
+    ("Sex", "5"),
+    ("Sab", "6"),
+    ("Dom", "7"),
+]
+REQUIRED_COLUMNS = [
+    "Cod. Empresa",
+    "Empresa",
+    "No Voo",
+    "Equip.",
+    "Seg",
+    "Ter",
+    "Qua",
+    "Qui",
+    "Sex",
+    "Sab",
+    "Dom",
+    "Quant. Assentos",
+    "No SIROS",
+    "Situacao SIROS",
+    "Data Registro",
+    "Inicio Operacao",
+    "Fim Operacao",
+    "Natureza Operacao",
+    "No Etapa",
+    "Cod. Origem",
+    "Arpt Origem",
+    "Cod Destino",
+    "Arpt Destino",
+    "Horario Partida",
+    "Horario Chegada",
+    "Tipo Servico",
+    "Objeto Transporte",
+    "Codeshare",
+]
+
+
+def sanitize_column_name(name):
+    replacements = {
+        "Ã³": "o",
+        "Ã“": "O",
+        "Ã£": "a",
+        "Ãƒ": "A",
+        "Ã¢": "a",
+        "Ã‚": "A",
+        "Ã¡": "a",
+        "Ã": "A",
+        "Ã©": "e",
+        "Ã‰": "E",
+        "Ã­": "i",
+        "Ã": "I",
+        "Ãº": "u",
+        "Ãš": "U",
+        "Ã§": "c",
+        "Ã‡": "C",
+        "Âº": "o",
+        "Âª": "a",
+        "Ã´": "o",
+        "Ã”": "O",
+    }
+    sanitized = name.strip()
+    for old, new in replacements.items():
+        sanitized = sanitized.replace(old, new)
+    return sanitized
+
 
 def ajustar_linha(line, comprimento=200):
     return line.ljust(comprimento)[:comprimento]
 
-def determinar_dia_semana(data_hora):
-    # Extrair o dia da semana da data_hora
-    dia_semana = data_hora.weekday()
-    dias_semana = ["1", "2", "3", "4", "5", "6", "7"]  # Segunda a Domingo
-    frequencia = [" "] * 7
-    frequencia[dia_semana] = dias_semana[dia_semana]
-    return "".join(frequencia)
 
-def determinar_status(tipo):
-    tipo_lower = tipo.lower()
-    if "regular" in tipo_lower and "carga" not in tipo_lower:
-        return "J"
-    else:
-        return "F"
+def normalizar_texto(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
 
-def format_timezone_offset(offset_str):
+
+def format_timezone_offset(offset_value):
     try:
-        offset = float(offset_str)
+        offset = float(offset_value)
         hours = int(offset)
         minutes = int(abs(offset - hours) * 60)
-        if offset >= 0:
-            sign = '+'
-        else:
-            sign = '-'
-            hours = -hours  # tornar horas positivas
-        offset_formatted = f"{sign}{abs(hours):02}{minutes:02}"
-        return offset_formatted
-    except ValueError:
-        # Se o offset não for um número, definir como '+0000'
-        return '+0000'
+        sign = "+" if offset >= 0 else "-"
+        return f"{sign}{abs(hours):02}{minutes:02}"
+    except (ValueError, TypeError):
+        return "+0000"
 
-def gerar_ssim(csv_path, codigo_iata, output_file=None):
+
+def normalizar_numero_voo(value):
+    numero = "".join(char for char in normalizar_texto(value) if char.isdigit())
+    return numero or normalizar_texto(value)
+
+
+def construir_frequencia(df):
+    frequency_parts = []
+    for column, digit in DAY_COLUMNS:
+        values = df[column].fillna("").astype(str).str.strip()
+        frequency_parts.append(np.where((values != "") & (values != "0"), digit, " "))
+    return pd.Series(["".join(parts) for parts in zip(*frequency_parts)], index=df.index)
+
+
+def determinar_status(objeto_transporte, tipo_servico, assentos):
+    texto = " ".join(
+        [
+            normalizar_texto(objeto_transporte).upper(),
+            normalizar_texto(tipo_servico).upper(),
+        ]
+    )
+
+    if "CARGA" in texto:
+        return "F"
+
     try:
-        # Ler o arquivo CSV, ignorando linhas com erros
-        df = pd.read_csv(csv_path, delimiter=';', encoding='latin1', on_bad_lines='skip')
-        df.columns = df.columns.str.strip()  # Remove espaços nos nomes das colunas
+        if pd.notna(assentos) and float(assentos) == 0:
+            return "F"
+    except (ValueError, TypeError):
+        pass
 
-        # Carregar o arquivo de mapeamento de aeroportos
-        airport_df = pd.read_csv('airport.csv')
-        airport_df['ICAO'] = airport_df['ICAO'].str.strip().str.upper()
-        airport_df['IATA'] = airport_df['IATA'].str.strip().str.upper()
+    return "J"
 
-        # Substituir '\N' por '0' na coluna 'Timezone'
-        airport_df['Timezone'] = airport_df['Timezone'].replace('\\N', '0')
 
-        # Converter a coluna 'Timezone' para float
-        airport_df['Timezone'] = airport_df['Timezone'].astype(float)
+def converter_horario_utc_para_local(time_value, tz_offset):
+    horario = normalizar_texto(time_value)
+    if not horario:
+        return "0000"
 
-        icao_to_iata_airport = dict(zip(airport_df['ICAO'], airport_df['IATA']))
-        icao_to_timezone = dict(zip(airport_df['ICAO'], airport_df['Timezone']))
+    try:
+        utc_dt = datetime.strptime(horario, "%H:%M")
+        local_dt = utc_dt + timedelta(hours=float(tz_offset))
+        return local_dt.strftime("%H%M")
+    except (ValueError, TypeError):
+        return "0000"
 
-        # Carregar o arquivo de mapeamento de aeronaves (arquivo Excel)
-        dtype_dict = {'ICAO': str, 'IATA': str}
-        aircraft_df = pd.read_excel('ACT TYPE.xlsx', dtype=dtype_dict)
-        aircraft_df['ICAO'] = aircraft_df['ICAO'].str.strip().str.upper()
-        aircraft_df['IATA'] = aircraft_df['IATA'].str.strip()
 
-        # Criar o dicionário de mapeamento
-        icao_to_iata_aircraft = dict(zip(aircraft_df['ICAO'], aircraft_df['IATA']))
+@st.cache_data(show_spinner=False)
+def carregar_aeroportos():
+    airport_df = pd.read_csv("airport.csv")
+    airport_df["ICAO"] = airport_df["ICAO"].fillna("").astype(str).str.strip().str.upper()
+    airport_df["IATA"] = airport_df["IATA"].fillna("").astype(str).str.strip().str.upper()
+    airport_df["Timezone"] = (
+        airport_df["Timezone"].replace("\\N", "0").fillna("0").astype(float)
+    )
 
-        # Converter as colunas de data/hora para datetime
-        df['Partida_Prevista_DH'] = pd.to_datetime(df['Partida Prevista'], format="%d/%m/%Y %H:%M", errors='coerce')
-        df['Chegada_Prevista_DH'] = pd.to_datetime(df['Chegada Prevista'], format="%d/%m/%Y %H:%M", errors='coerce')
+    return {
+        "icao_to_iata": dict(zip(airport_df["ICAO"], airport_df["IATA"])),
+        "icao_to_timezone": dict(zip(airport_df["ICAO"], airport_df["Timezone"])),
+    }
 
-        # Remover o 'Z' do número do voo, se existir
-        df['Voo'] = df['Voo'].astype(str).str.strip()
-        df['Voo'] = df['Voo'].str.replace('^Z', '', regex=True)
 
-        # Verificar se a coluna 'Etapa' existe
-        if 'Etapa' not in df.columns:
-            st.error("A coluna 'Etapa' não foi encontrada no arquivo CSV de malha.")
+@st.cache_data(show_spinner=False)
+def carregar_aeronaves():
+    aircraft_df = pd.read_excel("ACT TYPE.xlsx", dtype={"ICAO": str, "IATA": str})
+    aircraft_df["ICAO"] = aircraft_df["ICAO"].fillna("").astype(str).str.strip().str.upper()
+    aircraft_df["IATA"] = aircraft_df["IATA"].fillna("").astype(str).str.strip().str.upper()
+    return dict(zip(aircraft_df["ICAO"], aircraft_df["IATA"]))
+
+
+@st.cache_data(show_spinner=False)
+def carregar_companhias():
+    airlines_df = pd.read_csv("iata_airlines.csv")
+    airlines_df["ICAO code"] = (
+        airlines_df["ICAO code"].fillna("").astype(str).str.strip().str.upper()
+    )
+    airlines_df["IATA Designator"] = (
+        airlines_df["IATA Designator"].fillna("").astype(str).str.strip().str.upper()
+    )
+    return dict(zip(airlines_df["ICAO code"], airlines_df["IATA Designator"]))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def carregar_base_siros():
+    df = pd.read_csv(
+        SIROS_URL,
+        sep=";",
+        encoding="utf-8-sig",
+        skiprows=1,
+        dtype=str,
+    )
+    if len(df.columns) != len(REQUIRED_COLUMNS):
+        raise ValueError(
+            f"Quantidade inesperada de colunas na fonte SIROS: {len(df.columns)}"
+        )
+
+    df.columns = REQUIRED_COLUMNS
+
+    missing_columns = [column for column in REQUIRED_COLUMNS if column not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"Colunas obrigatorias ausentes na fonte SIROS: {', '.join(missing_columns)}"
+        )
+
+    for column in REQUIRED_COLUMNS:
+        df[column] = df[column].fillna("").astype(str).str.strip()
+
+    df = df[REQUIRED_COLUMNS].copy()
+
+    df["Inicio Operacao DT"] = pd.to_datetime(df["Inicio Operacao"], errors="coerce")
+    df["Fim Operacao DT"] = pd.to_datetime(df["Fim Operacao"], errors="coerce")
+    df = df[
+        df["Inicio Operacao DT"].notna()
+        & df["Fim Operacao DT"].notna()
+        & (df["No Voo"] != "")
+        & (df["Cod. Origem"] != "")
+        & (df["Cod Destino"] != "")
+    ].copy()
+
+    aeroportos = carregar_aeroportos()
+    aeronaves = carregar_aeronaves()
+    companhias = carregar_companhias()
+
+    df["Cod. Empresa"] = df["Cod. Empresa"].str.upper()
+    df["Cod. Origem"] = df["Cod. Origem"].str.upper()
+    df["Cod Destino"] = df["Cod Destino"].str.upper()
+    df["Equip."] = df["Equip."].str.upper()
+
+    df["Cliente IATA"] = df["Cod. Empresa"].map(companhias).fillna("")
+    df["Origem IATA"] = df["Cod. Origem"].map(aeroportos["icao_to_iata"]).fillna("")
+    df["Destino IATA"] = df["Cod Destino"].map(aeroportos["icao_to_iata"]).fillna("")
+    df["Origem TZ"] = (
+        df["Cod. Origem"].map(aeroportos["icao_to_timezone"]).fillna(0.0).astype(float)
+    )
+    df["Destino TZ"] = (
+        df["Cod Destino"].map(aeroportos["icao_to_timezone"]).fillna(0.0).astype(float)
+    )
+    df["Equipamento SSIM"] = df["Equip."].map(aeronaves).fillna(df["Equip."]).str[:3]
+
+    df["Base Origem"] = df["Origem IATA"].where(
+        df["Origem IATA"].str.len() == 3, df["Cod. Origem"]
+    )
+    df["Base Destino"] = df["Destino IATA"].where(
+        df["Destino IATA"].str.len() == 3, df["Cod Destino"]
+    )
+
+    df["Frequencia SSIM"] = construir_frequencia(df)
+    df["Assentos Num"] = pd.to_numeric(df["Quant. Assentos"], errors="coerce")
+    df["Status SSIM"] = [
+        determinar_status(objeto, tipo, assentos)
+        for objeto, tipo, assentos in zip(
+            df["Objeto Transporte"], df["Tipo Servico"], df["Assentos Num"]
+        )
+    ]
+    df["Partida Local"] = [
+        converter_horario_utc_para_local(horario, tz)
+        for horario, tz in zip(df["Horario Partida"], df["Origem TZ"])
+    ]
+    df["Chegada Local"] = [
+        converter_horario_utc_para_local(horario, tz)
+        for horario, tz in zip(df["Horario Chegada"], df["Destino TZ"])
+    ]
+    df["Numero Voo SSIM"] = df["No Voo"].map(normalizar_numero_voo)
+    df["Etapa SSIM"] = df["No Etapa"].replace("", "1").str.zfill(2)
+    df["Flight Sort"] = pd.to_numeric(df["Numero Voo SSIM"], errors="coerce")
+    df["Etapa Sort"] = pd.to_numeric(df["Etapa SSIM"], errors="coerce").fillna(99)
+
+    return df
+
+
+def construir_opcoes_clientes(df):
+    client_rows = (
+        df[["Cod. Empresa", "Empresa", "Cliente IATA"]]
+        .drop_duplicates()
+        .sort_values(["Empresa", "Cod. Empresa"])
+    )
+
+    options = {}
+    for row in client_rows.itertuples(index=False):
+        codigo = normalizar_texto(row[0])
+        empresa = normalizar_texto(row[1])
+        iata = normalizar_texto(row[2]) or "--"
+        options[codigo] = f"{empresa} ({iata}/{codigo})"
+
+    return options
+
+
+def construir_opcoes_aeroportos(df):
+    airport_rows = pd.concat(
+        [
+            df[["Base Origem", "Arpt Origem"]].rename(
+                columns={"Base Origem": "Aeroporto", "Arpt Origem": "Nome"}
+            ),
+            df[["Base Destino", "Arpt Destino"]].rename(
+                columns={"Base Destino": "Aeroporto", "Arpt Destino": "Nome"}
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    airport_rows = airport_rows[
+        (airport_rows["Aeroporto"] != "") & airport_rows["Nome"].notna()
+    ].drop_duplicates()
+    airport_rows = airport_rows.sort_values(["Aeroporto", "Nome"])
+
+    options = {}
+    for row in airport_rows.itertuples(index=False):
+        options[row[0]] = f"{row[0]} | {normalizar_texto(row[1])}"
+
+    return options
+
+
+def filtrar_registros(df, cliente_codigo, aeroportos_selecionados, data_inicio, data_fim):
+    data_inicio_ts = pd.Timestamp(data_inicio)
+    data_fim_ts = pd.Timestamp(data_fim)
+
+    mask = df["Cod. Empresa"].eq(cliente_codigo)
+    mask &= df["Fim Operacao DT"].ge(data_inicio_ts)
+    mask &= df["Inicio Operacao DT"].le(data_fim_ts)
+
+    if aeroportos_selecionados:
+        mask &= df["Base Origem"].isin(aeroportos_selecionados) | df["Base Destino"].isin(
+            aeroportos_selecionados
+        )
+
+    filtered = df.loc[mask].copy()
+    if filtered.empty:
+        return filtered
+
+    filtered["SSIM Start DT"] = filtered["Inicio Operacao DT"].clip(lower=data_inicio_ts)
+    filtered["SSIM End DT"] = filtered["Fim Operacao DT"].clip(upper=data_fim_ts)
+    filtered = filtered[filtered["SSIM Start DT"] <= filtered["SSIM End DT"]].copy()
+
+    filtered["SSIM Start"] = filtered["SSIM Start DT"].dt.strftime("%d%b%y").str.upper()
+    filtered["SSIM End"] = filtered["SSIM End DT"].dt.strftime("%d%b%y").str.upper()
+
+    return filtered
+
+
+def gerar_ssim(df, codigo_iata, output_file=None):
+    if df.empty:
+        raise ValueError("Nenhum registro disponivel para gerar o SSIM.")
+
+    data_min = df["SSIM Start DT"].min().strftime("%d%b%y").upper()
+    data_max = df["SSIM End DT"].max().strftime("%d%b%y").upper()
+    data_emissao = datetime.now().strftime("%d%b%y").upper()
+    data_emissao2 = datetime.now().strftime("%Y%m%d").upper()
+
+    if output_file is None:
+        output_file = f"{codigo_iata} {data_emissao2} {data_min}-{data_max}.ssim"
+
+    lines = []
+    numero_linha = 1
+
+    linha_1_conteudo = "1AIRLINE STANDARD SCHEDULE DATA SET"
+    linha_1 = linha_1_conteudo + (" " * (200 - len(linha_1_conteudo) - 8)) + f"{numero_linha:08}"
+    lines.append(linha_1)
+    numero_linha += 1
+
+    for _ in range(4):
+        lines.append("0" * 200)
+        numero_linha += 1
+
+    linha_2_conteudo = (
+        f"2L{codigo_iata}  0008    {data_min}{data_max}{data_emissao}Created by dnata capacity"
+    )
+    posicao_p = 72
+    espacos_antes_p = max(posicao_p - len(linha_2_conteudo) - 1, 0)
+    linha_2 = linha_2_conteudo + (" " * espacos_antes_p) + "P"
+    numero_linha_str = f" EN08{numero_linha:08}"
+    linha_2 += " " * (200 - len(linha_2) - len(numero_linha_str)) + numero_linha_str
+    lines.append(linha_2)
+    numero_linha += 1
+
+    for _ in range(4):
+        lines.append("0" * 200)
+        numero_linha += 1
+
+    flight_date_counter = {}
+    df_sorted = df.sort_values(
+        by=["Flight Sort", "Numero Voo SSIM", "SSIM Start DT", "Etapa Sort"]
+    )
+
+    for _, row in df_sorted.iterrows():
+        numero_voo = normalizar_texto(row["Numero Voo SSIM"]) or "0"
+        etapa = normalizar_texto(row["Etapa SSIM"]) or "01"
+
+        if numero_voo not in flight_date_counter:
+            flight_date_counter[numero_voo] = 0
+        if etapa == "01":
+            flight_date_counter[numero_voo] += 1
+
+        date_counter = flight_date_counter[numero_voo]
+        numero_voo_padded = numero_voo.zfill(4)
+        eight_char_field = f"{numero_voo_padded}{str(date_counter).zfill(2)}{etapa}"
+        numero_voo_display = numero_voo.rjust(5)
+
+        origem = normalizar_texto(row["Origem IATA"]) or normalizar_texto(row["Base Origem"])
+        destino = normalizar_texto(row["Destino IATA"]) or normalizar_texto(row["Base Destino"])
+        origem_tz = format_timezone_offset(row["Origem TZ"])
+        destino_tz = format_timezone_offset(row["Destino TZ"])
+        equipamento = normalizar_texto(row["Equipamento SSIM"])[:3]
+
+        linha_3 = (
+            f"3 "
+            f"{codigo_iata:<2} "
+            f"{eight_char_field}"
+            f"{normalizar_texto(row['Status SSIM'])}"
+            f"{normalizar_texto(row['SSIM Start'])}"
+            f"{normalizar_texto(row['SSIM End'])}"
+            f"{normalizar_texto(row['Frequencia SSIM'])}"
+            f" "
+            f"{origem:<3}"
+            f"{normalizar_texto(row['Partida Local'])}"
+            f"{normalizar_texto(row['Partida Local'])}"
+            f"{origem_tz}"
+            f"  "
+            f"{destino:<3}"
+            f"{normalizar_texto(row['Chegada Local'])}"
+            f"{normalizar_texto(row['Chegada Local'])}"
+            f"{destino_tz}"
+            f"  "
+            f"{equipamento:<3}"
+            f"{' ':53}"
+            f"{codigo_iata:<2}"
+            f"{' ':7}"
+            f"{codigo_iata:<2}"
+            f"{numero_voo_display}"
+            f"{' ':28}"
+            f"{' ':6}"
+            f"{' ':5}"
+            f"{' ':9}"
+            f"{numero_linha:08}"
+        )
+        lines.append(ajustar_linha(linha_3))
+        numero_linha += 1
+
+    for _ in range(4):
+        lines.append("0" * 200)
+        numero_linha += 1
+
+    linha_5_conteudo = f"5 {codigo_iata} {data_emissao}"
+    numero_linha_str = f"{numero_linha + 1:06}"
+    numero_linha_str2 = f"{numero_linha:06}E"
+    linha_5 = linha_5_conteudo + (
+        " " * (200 - len(linha_5_conteudo) - len(numero_linha_str) - len(numero_linha_str2))
+    )
+    linha_5 += numero_linha_str2 + numero_linha_str
+    lines.append(linha_5)
+
+    return output_file, "\n".join(lines)
+
+
+def main():
+    st.set_page_config(page_title="Gerador de Arquivo SSIM", page_icon="âœˆï¸", layout="wide")
+    st.title("Gerador de Arquivo SSIM")
+    st.caption("Fonte: SIROS API â€¢ horarios recebidos em UTC â€¢ output SSIM preservado")
+
+    col_refresh, col_info = st.columns([1, 4])
+    with col_refresh:
+        if st.button("Atualizar base"):
+            carregar_base_siros.clear()
+            st.rerun()
+    with col_info:
+        st.info(SIROS_URL)
+
+    with st.spinner("Carregando base do SIROS..."):
+        try:
+            df = carregar_base_siros()
+        except Exception as exc:
+            st.error(f"Erro ao carregar a base do SIROS: {exc}")
             return
 
-        # Garantir que a 'Etapa' tenha dois dígitos
-        df['Etapa'] = df['Etapa'].astype(str).str.strip().str.zfill(2)
+    if df.empty:
+        st.warning("A fonte do SIROS nao retornou registros utilizaveis.")
+        return
 
-        # Determinar datas mínima e máxima no CSV
-        data_min_date = df['Partida_Prevista_DH'].dt.date.min()
-        data_max_date = df['Chegada_Prevista_DH'].dt.date.max()
-        data_min = data_min_date.strftime("%d%b%y").upper()
-        data_max = data_max_date.strftime("%d%b%y").upper()
+    clientes = construir_opcoes_clientes(df)
+    cliente_codigo = st.selectbox(
+        "Companhia aerea",
+        options=list(clientes.keys()),
+        format_func=lambda value: clientes[value],
+    )
 
-        # Alterar o formato da data de emissão
-        data_emissao = datetime.now().strftime("%d%b%y").upper()
-        data_emissao2 = datetime.now().strftime("%Y%m%d").upper()
+    client_df = df[df["Cod. Empresa"] == cliente_codigo].copy()
+    aeroportos = construir_opcoes_aeroportos(client_df)
 
-        # Construir o nome do arquivo no novo padrão
-        if output_file is None:
-            output_file = f"{codigo_iata} {data_emissao2} {data_min}-{data_max}.ssim"
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        aeroportos_selecionados = st.multiselect(
+            "Aeroportos",
+            options=list(aeroportos.keys()),
+            default=[],
+            format_func=lambda value: aeroportos[value],
+            help="Se nenhum aeroporto for selecionado, todos os aeroportos da companhia entram no SSIM.",
+        )
+    with col2:
+        min_date = client_df["Inicio Operacao DT"].min().date()
+        max_date = client_df["Fim Operacao DT"].max().date()
+        default_start = max(min_date, min(date.today(), max_date))
+        data_inicio = st.date_input(
+            "Data inicial",
+            value=default_start,
+            min_value=min_date,
+            max_value=max_date,
+        )
+    with col3:
+        default_end = min(max_date, default_start + timedelta(days=30))
+        data_fim = st.date_input(
+            "Data final",
+            value=default_end,
+            min_value=min_date,
+            max_value=max_date,
+        )
 
-        # Criar o arquivo SSIM
-        with open(output_file, 'w') as file:
-            numero_linha = 1
+    if data_inicio > data_fim:
+        st.error("A data inicial nao pode ser maior que a data final.")
+        return
 
-            # Linha 1
-            numero_linha_str = f"{numero_linha:08}"
-            linha_1_conteudo = "1AIRLINE STANDARD SCHEDULE DATA SET"
-            espacos_necessarios = 200 - len(linha_1_conteudo) - len(numero_linha_str)
-            linha_1 = linha_1_conteudo + (' ' * espacos_necessarios) + numero_linha_str
-            file.write(linha_1 + "\n")
-            numero_linha += 1
+    filtered = filtrar_registros(df, cliente_codigo, aeroportos_selecionados, data_inicio, data_fim)
 
-            # Linhas de zeros
-            for _ in range(4):
-                zeros_line = "0" * 200
-                file.write(zeros_line + "\n")
-                numero_linha += 1
+    resolved_iata = normalizar_texto(client_df["Cliente IATA"].iloc[0]) if not client_df.empty else ""
+    if resolved_iata:
+        st.caption(f"Codigo IATA da companhia para o SSIM: `{resolved_iata}`")
+        codigo_iata = resolved_iata
+    else:
+        codigo_iata = st.text_input(
+            "Codigo IATA da companhia",
+            max_chars=2,
+            help="Preenchimento manual usado apenas quando nao houver mapeamento ICAO -> IATA.",
+        ).upper()
 
-            # Linha 2
-            linha_2_conteudo = f"2L{codigo_iata}  0008    {data_min}{data_max}{data_emissao}Created by dnata capacity"
-            posicao_p = 72
-            espacos_antes_p = posicao_p - len(linha_2_conteudo) - 1
-            linha_2 = linha_2_conteudo + (' ' * espacos_antes_p) + 'P'
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Registros na base", f"{len(df):,}")
+    with col2:
+        st.metric("Registros da companhia", f"{len(client_df):,}")
+    with col3:
+        st.metric("Registros filtrados", f"{len(filtered):,}")
+    with col4:
+        st.metric("Aeroportos disponiveis", len(aeroportos))
 
-            # Ajuste conforme solicitado
-            numero_linha_str = f" EN08{numero_linha:08}"
-            espacos_restantes = 200 - len(linha_2) - len(numero_linha_str)
-            linha_2 += (' ' * espacos_restantes) + numero_linha_str
-            file.write(linha_2 + "\n")
-            numero_linha += 1
+    preview_columns = [
+        "Empresa",
+        "Cliente IATA",
+        "No Voo",
+        "Base Origem",
+        "Base Destino",
+        "SSIM Start",
+        "SSIM End",
+        "Frequencia SSIM",
+        "Partida Local",
+        "Chegada Local",
+        "Status SSIM",
+    ]
 
-            # Linhas de zeros
-            for _ in range(4):
-                zeros_line = "0" * 200
-                file.write(zeros_line + "\n")
-                numero_linha += 1
+    if not filtered.empty:
+        preview_df = filtered[preview_columns].head(50).rename(
+            columns={
+                "Cliente IATA": "IATA",
+                "Base Origem": "Aeroporto Origem",
+                "Base Destino": "Aeroporto Destino",
+            }
+        )
+        st.dataframe(preview_df, use_container_width=True)
+    else:
+        st.warning("Nenhum registro encontrado com os filtros selecionados.")
 
-            # Definir o fuso horário de Brasília
-            brasilia_offset = -3.0
+    if st.button("Gerar Arquivo SSIM", type="primary", use_container_width=True):
+        if not codigo_iata or len(codigo_iata) != 2:
+            st.error("Nao foi possivel determinar um codigo IATA valido para a companhia.")
+            return
 
-            # Inicializar o dicionário para rastrear o date_counter por voo
-            flight_date_counter = {}
+        if filtered.empty:
+            st.error("Nao ha registros para gerar o SSIM com os filtros atuais.")
+            return
 
-            # Ordenar o DataFrame para garantir a ordem correta
-            df_sorted = df.sort_values(by=['Voo', 'Partida_Prevista_DH'])
-
-            # Linhas 3
-            for _, row in df_sorted.iterrows():
-                partida_prevista_dh = row['Partida_Prevista_DH']
-                chegada_prevista_dh = row['Chegada_Prevista_DH']
-
-                frequencia = determinar_dia_semana(partida_prevista_dh)
-                status = determinar_status(row['Tipo'])
-
-                # Converter os códigos dos aeroportos de ICAO para IATA
-                origem_icao = row['Origem'].strip().upper()
-                destino_icao = row['Destino'].strip().upper()
-                origem = icao_to_iata_airport.get(origem_icao, origem_icao)
-                destino = icao_to_iata_airport.get(destino_icao, destino_icao)
-
-                # Obter o timezone dos aeroportos
-                origem_timezone_offset = icao_to_timezone.get(origem_icao, 0.0)  # Padrão 0.0 se não encontrado
-                destino_timezone_offset = icao_to_timezone.get(destino_icao, 0.0)  # Padrão 0.0 se não encontrado
-
-                origem_offset = origem_timezone_offset
-                destino_offset = destino_timezone_offset
-
-                # Calcular a diferença de fuso horário
-                offset_difference_origin = origem_offset - brasilia_offset
-                offset_difference_destino = destino_offset - brasilia_offset
-
-                # Ajustar os horários para o horário local dos aeroportos
-                partida_prevista_dh_local = partida_prevista_dh + timedelta(hours=offset_difference_origin)
-                chegada_prevista_dh_local = chegada_prevista_dh + timedelta(hours=offset_difference_destino)
-
-                # Formatar os timezones para o arquivo SSIM
-                origem_timezone_formatted = format_timezone_offset(str(origem_offset))
-                destino_timezone_formatted = format_timezone_offset(str(destino_offset))
-
-                # Extrair horários de partida e chegada em horário local
-                partida = partida_prevista_dh_local.strftime("%H%M")
-                chegada = chegada_prevista_dh_local.strftime("%H%M")
-
-                # Converter o código da aeronave de ICAO para IATA
-                equipamento_icao = row['Equip'].strip().upper()
-                equipamento = icao_to_iata_aircraft.get(equipamento_icao, equipamento_icao)
-
-                # Obter as datas de partida e chegada formatadas
-                data_partida = partida_prevista_dh_local.strftime("%d%b%y").upper()
-                data_chegada = chegada_prevista_dh_local.strftime("%d%b%y").upper()
-
-                # Número do voo
-                numero_voo = str(row['Voo']).strip()
-
-                # Número do voo preenchido com zeros à esquerda até 4 dígitos
-                numero_voo_padded = numero_voo.zfill(4)
-
-                # Obter a 'Etapa' do CSV e garantir dois dígitos
-                etapa = row['Etapa']
-                if pd.isnull(etapa):
-                    etapa = "00"  # Valor padrão se 'Etapa' estiver ausente
-                else:
-                    etapa = str(etapa).strip().zfill(2)
-
-                # Lógica para determinar o date_counter baseado na Etapa
-                if numero_voo not in flight_date_counter:
-                    flight_date_counter[numero_voo] = 0  # Inicializa o date_counter com 0
-                if etapa == "01":
-                    flight_date_counter[numero_voo] += 1  # Incrementa o date_counter quando Etapa é 01
-
-                date_counter = flight_date_counter[numero_voo]
-
-                # Construir o campo de 8 caracteres substituindo 'occurrence_counter' por 'Etapa'
-                eight_char_field = f"{numero_voo_padded}{str(date_counter).zfill(2)}{etapa}"
-
-                # Número do voo para exibição (preenchido com espaços à direita até 5 caracteres)
-                numero_voo_display = numero_voo.rjust(5)
-
-                # Número da linha formatado com 8 dígitos
-                numero_linha_str = f"{numero_linha:08}"
-
-                # Construção da linha 3
-                linha_3 = (
-                    f"3 "
-                    f"{codigo_iata:<2} "
-                    f"{eight_char_field}"
-                    f"{status}"
-                    f"{data_partida}"
-                    f"{data_chegada}"
-                    f"{frequencia}"
-                    f" "
-                    f"{origem:<3}"
-                    f"{partida}"
-                    f"{partida}"
-                    f"{origem_timezone_formatted}"
-                    f"  "
-                    f"{destino:<3}"
-                    f"{chegada}"
-                    f"{chegada}"
-                    f"{destino_timezone_formatted}"
-                    f"  "
-                    f"{equipamento:<3}"
-                    f"{' ':53}"
-                    f"{codigo_iata:<2}"
-                    f"{' ':7}"
-                    f"{codigo_iata:<2}"
-                    f"{numero_voo_display}"
-                    f"{' ':28}"
-                    f"{' ':6}"
-                    f"{' ':5}"
-                    f"{' ':9}"
-                    f"{numero_linha_str}"
-                )
-
-                # Garantir que a linha tenha exatamente 200 caracteres
-                linha_3 = linha_3.ljust(200)
-
-                file.write(linha_3 + "\n")
-                numero_linha += 1
-
-            # Linhas de zeros
-            for _ in range(4):
-                zeros_line = "0" * 200
-                file.write(zeros_line + "\n")
-                numero_linha += 1
-
-            # Linha 5 (Última linha)
-            numero_linha_str = f"{numero_linha + 1:06}"
-            linha_5_conteudo = f"5 {codigo_iata} {data_emissao}"
-            numero_linha_str2 = f"{numero_linha:06}E"
-            espacos_necessarios = 200 - len(linha_5_conteudo) - len(numero_linha_str) - len(numero_linha_str2)
-            linha_5 = linha_5_conteudo + (' ' * espacos_necessarios) + numero_linha_str2 + numero_linha_str
-            file.write(linha_5 + "\n")
-            numero_linha += 1
+        try:
+            output_file, ssim_content = gerar_ssim(filtered, codigo_iata)
+        except Exception as exc:
+            st.error(f"Erro ao gerar o SSIM: {exc}")
+            return
 
         st.success(f"Arquivo SSIM gerado: {output_file}")
 
-        # Oferecer o arquivo para download
-        with open(output_file, 'rb') as f:
-            st.download_button(
-                label="Baixar Arquivo SSIM",
-                data=f,
-                file_name=output_file,
-                mime='text/plain'
+        ssim_lines = ssim_content.splitlines()
+        flight_lines = [line for line in ssim_lines if line.startswith("3 ")]
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Linhas SSIM", len(ssim_lines))
+        with col2:
+            st.metric("Linhas de voo", len(flight_lines))
+        with col3:
+            st.metric(
+                "Validacao 200 chars",
+                "OK" if all(len(line) == 200 for line in ssim_lines) else "Falha",
             )
 
-    except Exception as e:
-        st.error(f"Ocorreu um erro ao gerar o arquivo SSIM:\n{e}")
+        st.download_button(
+            label="Baixar Arquivo SSIM",
+            data=ssim_content.encode("utf-8"),
+            file_name=output_file,
+            mime="text/plain",
+        )
 
-# Interface Streamlit
+        st.code("\n".join(ssim_lines[:20]), language="text")
 
-st.title("Gerador de Arquivo SSIM")
 
-# Carregar a lista de companhias aéreas
-airlines_df = pd.read_csv('iata_airlines.csv')
+if __name__ == "__main__":
+    main()
 
-# Opção para selecionar o método de entrada
-metodo_selecao = st.radio("Selecione o método para informar o código IATA da companhia aérea:",
-                          ("Selecionar por País e Companhia Aérea", "Inserir código IATA manualmente"))
-
-if metodo_selecao == "Selecionar por País e Companhia Aérea":
-    # Opções de filtro
-    paises = airlines_df['Country / Territory'].dropna().unique()
-    paises = sorted(paises)
-
-    pais_selecionado = st.selectbox("Selecione o País / Território:", ["Todos"] + list(paises))
-
-    if pais_selecionado != "Todos":
-        airlines_df_filtrado = airlines_df[airlines_df['Country / Territory'] == pais_selecionado]
-    else:
-        airlines_df_filtrado = airlines_df
-
-    companhias = airlines_df_filtrado['Airline Name'].dropna().unique()
-    companhias = sorted(companhias)
-
-    companhia_selecionada = st.selectbox("Selecione a Companhia Aérea:", companhias)
-
-    # Obter o código IATA da companhia selecionada
-    codigo_iata = airlines_df_filtrado[airlines_df_filtrado['Airline Name'] == companhia_selecionada]['IATA Designator'].values[0]
-
-    st.write(f"Código IATA selecionado: {codigo_iata}")
-
-elif metodo_selecao == "Inserir código IATA manualmente":
-    codigo_iata = st.text_input("Digite o código IATA da companhia aérea (2 caracteres):").upper()
-
-    if not codigo_iata or len(codigo_iata) != 2:
-        st.warning("Por favor, insira um código IATA válido de 2 caracteres.")
-
-# Upload do arquivo de malha CSV
-csv_file = st.file_uploader("Faça o upload do arquivo de malha CSV:", type=['csv'])
-
-if st.button("Gerar Arquivo SSIM"):
-    if not csv_file:
-        st.warning("Por favor, faça o upload do arquivo de malha CSV.")
-    elif metodo_selecao == "Inserir código IATA manualmente" and (not codigo_iata or len(codigo_iata) != 2):
-        st.warning("Por favor, insira um código IATA válido de 2 caracteres.")
-    else:
-        # Salvar o arquivo CSV no disco
-        csv_path = 'malha.csv'
-        with open(csv_path, 'wb') as f:
-            f.write(csv_file.getbuffer())
-
-        gerar_ssim(csv_path, codigo_iata)
