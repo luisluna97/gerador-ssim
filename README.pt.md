@@ -45,11 +45,11 @@ Se nenhum aeroporto for selecionado, o app usa todos os aeroportos da companhia 
 - `Horario Partida` / `Horario Chegada` -> horarios locais no SSIM
 - `Quant. Assentos` + `Objeto Transporte` / `Tipo Servico` -> status `J` ou `F`
 
-## Execucao local
+## Acesso
 
-```bash
-streamlit run app.py
-```
+Use a aplicacao publicada em:
+
+`https://gerador-ssim-me42pp9k4m78esyvgvreyw.streamlit.app/`
 
 ## Arquivos principais
 
