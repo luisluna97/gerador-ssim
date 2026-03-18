@@ -471,7 +471,7 @@ def main():
             carregar_base_siros.clear()
             st.rerun()
     with col_info:
-        st.info(SIROS_URL)
+        st.info("Base publica do SIROS")
 
     with st.spinner("Carregando base do SIROS..."):
         try:
