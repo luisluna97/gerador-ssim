@@ -1,12 +1,10 @@
 # SSIM File Generator
 
-Streamlit application that generates SSIM files from the public SIROS/ANAC data source.
+Streamlit application that generates SSIM files from the public SIROS data source.
 
 ## Overview
 
-The current version no longer depends on a CSV uploaded by the user. The app reads directly from:
-
-`https://siros.anac.gov.br/siros/registros/registros/registros.csv`
+The current version no longer depends on a CSV uploaded by the user. The app reads directly from the public SIROS dataset.
 
 The user selects:
 

@@ -110,6 +110,17 @@ def construir_frequencia(df):
     return pd.Series(["".join(parts) for parts in zip(*frequency_parts)], index=df.index)
 
 
+def formatar_frequencia_ssim(value):
+    if pd.isna(value):
+        return " " * 7
+
+    frequencia = str(value)
+    if len(frequencia) >= 7:
+        return frequencia[:7]
+
+    return frequencia.ljust(7)
+
+
 def determinar_status(objeto_transporte, tipo_servico, assentos):
     texto = " ".join(
         [
@@ -406,7 +417,7 @@ def gerar_ssim(df, codigo_iata, output_file=None):
             f"{normalizar_texto(row['Status SSIM'])}"
             f"{normalizar_texto(row['SSIM Start'])}"
             f"{normalizar_texto(row['SSIM End'])}"
-            f"{normalizar_texto(row['Frequencia SSIM'])}"
+            f"{formatar_frequencia_ssim(row['Frequencia SSIM'])}"
             f" "
             f"{origem:<3}"
             f"{normalizar_texto(row['Partida Local'])}"
@@ -452,7 +463,7 @@ def gerar_ssim(df, codigo_iata, output_file=None):
 def main():
     st.set_page_config(page_title="Gerador de Arquivo SSIM", page_icon="âœˆï¸", layout="wide")
     st.title("Gerador de Arquivo SSIM")
-    st.caption("Fonte: SIROS API â€¢ horarios recebidos em UTC â€¢ output SSIM preservado")
+    st.caption("Fonte: SIROS")
 
     col_refresh, col_info = st.columns([1, 4])
     with col_refresh:

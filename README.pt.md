@@ -1,12 +1,10 @@
 # Gerador de Arquivo SSIM
 
-Aplicacao Streamlit para gerar arquivos SSIM a partir da base publica do SIROS/ANAC.
+Aplicacao Streamlit para gerar arquivos SSIM a partir da base publica do SIROS.
 
 ## Visao geral
 
-Na versao atual, a fonte de dados nao e mais um CSV enviado pelo usuario. O app consome diretamente o endpoint:
-
-`https://siros.anac.gov.br/siros/registros/registros/registros.csv`
+Na versao atual, a fonte de dados nao e mais um CSV enviado pelo usuario. O app consome diretamente a base publica do SIROS.
 
 O usuario seleciona:
 
